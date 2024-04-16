@@ -62,6 +62,161 @@ def apply_pca(X, num_components):
         print("ERROR: An unexpected error occurred during PCA computation in apply_pca() function:", e)
         raise
     
+def decision_stump(X, y, weights, num_midpoints=1000):
+    """
+    Find the best decision stump using weighted error with randomly selected midpoints.
+    
+    Parameters:
+        X (np.array): The training features, shape (m, n).
+        y (np.array): The training labels, shape (m,).
+        weights (np.array): The weights of each instance, shape (m,).
+        num_midpoints (int): The number of midpoints to consider for splits, defaults to 1000.
+    
+    Returns:
+        dict: The best decision stump parameters including feature index, threshold and inequality direction.
+        float: The weighted error of the best decision stump.
+    """
+    try:
+        m, n = X.shape
+        best_stump = {}
+        min_error = np.inf
+
+        # Iterate over all features (Here, n = 5)
+        for j in range(n):
+            feature_values = np.sort(np.unique(X[:, j]))
+            
+            if len(feature_values) > 2:  # Check if there are at least two unique values to form a midpoint
+                if len(feature_values) > num_midpoints:
+                    # Randomly pick indices of the sorted unique values to consider as potential splits
+                    indices = np.random.choice(len(feature_values) - 1, num_midpoints, replace=False)
+                    indices.sort()  # Sort indices to maintain order of feature values
+                else:
+                    indices = np.arange(len(feature_values) - 1)
+                    
+                thresholds = (feature_values[indices] + feature_values[indices + 1]) / 2
+            else:
+                thresholds = feature_values  # Fallback to the unique values themselves if too few values exist
+
+            for threshold in thresholds:
+                for inequality in ["lt", "gt"]:  # less than or greater than
+                    # Predict labels based on the threshold and inequality
+                    predicted_labels = np.where(X[:, j] < threshold, -1, 1)
+                    if inequality == "gt":
+                        predicted_labels = -predicted_labels
+
+                    # Error calculation with weights
+                    weighted_errors = weights * (predicted_labels != y)
+                    weighted_error = np.sum(weighted_errors) / np.sum(weights)
+
+                    # Update the best stump if this one has lower error
+                    if weighted_error < min_error:
+                        min_error = weighted_error
+                        best_stump['feature'] = j
+                        best_stump['threshold'] = threshold
+                        best_stump['inequality'] = inequality
+
+        return best_stump, min_error
+    except Exception as e:
+        print(f"ERROR: Error in decision_stump() function: {e}")
+        raise
+
+def compute_alpha(error):
+    """
+    Compute the alpha value for a given error.
+    
+    Parameters:
+        error (float): The weighted error from a decision stump.
+    
+    Returns:
+        float: The alpha value used to update instance weights.
+    """
+    try:
+        return np.log((1 - error) / error)
+    except ZeroDivisionError:
+        print("ERROR: Error in compute_alpha() function: Division by zero when computing alpha")
+        raise
+    except Exception as e:
+        print(f"ERROR: An unexpected error occurred in compute_alpha() function: {e}")
+        raise
+    
+def update_weights(weights, predictions, y, alpha):
+    """
+    Update the weights for the next iteration of AdaBoost without normalizing.
+    
+    Parameters:
+        weights (np.array): Current weights of the instances.
+        predictions (np.array): Predictions made by the current decision stump.
+        y (np.array): Actual labels of the instances.
+        alpha (float): The alpha value computed from the current decision stump's error.
+    
+    Returns:
+        np.array: The updated weights.
+    """
+    try:
+        # Update weights based on prediction accuracy
+        misclassified = predictions != y
+        weights *= np.exp(alpha * misclassified)
+        return weights  # Return unnormalized weights
+    except Exception as e:
+        print(f"Error in update_weights: {e}")
+        raise
+
+def adaboost_train(X, y, num_iterations=300):
+    """
+    Train an AdaBoost classifier using decision stumps.
+    
+    Parameters:
+        X (np.array): The training features, shape (m, n).
+        y (np.array): The training labels, shape (m,).
+        num_iterations (int): Number of boosting rounds, defaults to 300.
+    
+    Returns:
+        list: List of decision stumps, each is a dictionary of stump parameters.
+        list: List of alpha values corresponding to each stump.
+    """
+    try:
+        m, n = X.shape
+        weights = np.ones(m) / m
+        models = [] # num_iterations (Default = 300) number of decision stumps will be stored
+        alphas = []
+
+        for i in range(num_iterations):
+            stump, error = decision_stump(X, y, weights)
+            if stump is None:
+                break
+            alpha = compute_alpha(error)
+            if alpha is None:
+                continue
+            predictions = stump_predict(X, stump['feature'], stump['threshold'], stump['inequality'])
+            weights = update_weights(weights, predictions, y, alpha)
+
+            models.append(stump)
+            alphas.append(alpha)
+            print(f"Iteration {i+1}: error= {error:.2f}, alpha= {alpha:.2f}")
+
+        return models, alphas
+    except Exception as e:
+        print(f"Error in adaboost_train: {e}")
+        raise
+
+def stump_predict(X, feature, threshold, inequality):
+    """
+    Function: Make predictions using a decision stump.
+    
+    Parameters:
+        X (np.array): The dataset to predict, shape (m, n).
+        feature (int): The feature index on which the stump makes a split.
+        threshold (float): The threshold value for the split.
+        inequality (str): The inequality direction, either "lt" (less than) or "gt" (greater than).
+    
+    Returns:
+        np.array: Predictions made by the stump, shape (m,).
+    """
+    if inequality == "lt":
+        return np.where(X[:, feature] < threshold, -1, 1)
+    else:
+        return np.where(X[:, feature] < threshold, 1, -1)
+             
 def main():
     try:
         # Load the dataset
@@ -116,6 +271,11 @@ def main():
         print("Shapes of reduced datasets after PCA:")
         print(f"Training set reduced: {train_reduced.shape}")
         print(f"Validation set reduced: {val_reduced.shape}\n")
+        
+         # Training AdaBoost with decision stumps on reduced training data
+        models, alphas = adaboost_train(train_reduced, train_labels_final, num_iterations=300)
+        
+        print("\nAdaBoost training with 300 decision stump models completed successfully.\n")
         
     except Exception as e:
         print(f"ERROR: An unexpected error occurred in main() function: {e}")
