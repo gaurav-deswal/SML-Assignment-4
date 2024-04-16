@@ -1,4 +1,5 @@
 import numpy as np
+import matplotlib.pyplot as plt
 
 def load_mnist_dataset(file_path):
     try:
@@ -158,7 +159,7 @@ def update_weights(weights, predictions, y, alpha):
         weights *= np.exp(alpha * misclassified)
         return weights  # Return unnormalized weights
     except Exception as e:
-        print(f"Error in update_weights: {e}")
+        print(f"ERROR: Error in update_weights() function: {e}")
         raise
 
 def adaboost_train(X, y, num_iterations=300):
@@ -196,7 +197,7 @@ def adaboost_train(X, y, num_iterations=300):
 
         return models, alphas
     except Exception as e:
-        print(f"Error in adaboost_train: {e}")
+        print(f"ERROR: Error in adaboost_train() function: {e}")
         raise
 
 def stump_predict(X, feature, threshold, inequality):
@@ -216,19 +217,54 @@ def stump_predict(X, feature, threshold, inequality):
         return np.where(X[:, feature] < threshold, -1, 1)
     else:
         return np.where(X[:, feature] < threshold, 1, -1)
+   
+def evaluate_accuracy(X, y, models, alphas):
+    """
+    Evaluate the cumulative accuracy of the AdaBoost models on given dataset.
+    
+    Parameters:
+        X (np.array): Data features, shape (m, n).
+        y (np.array): True labels, shape (m,).
+        models (list): List of weak models (stumps), each containing model parameters.
+        alphas (list): List of alpha values for each model, corresponding to their weight in the final decision.
+    
+    Returns:
+        float: The accuracy of the AdaBoost model, expressed as a fraction between 0 and 1.
+    """
+    try:
+        agg_predictions = np.zeros(X.shape[0])
+        for model, alpha in zip(models, alphas):
+            predictions = stump_predict(X, model['feature'], model['threshold'], model['inequality'])
+            agg_predictions += alpha * predictions
+        
+        final_predictions = np.sign(agg_predictions) # Used sign() as the same function was used in the class by Sir
+        accuracy = np.mean(final_predictions == y)
+        return accuracy
+    except ValueError as e:
+        print(f"ERROR: Error in evaluate_accuracy() function: Input dimension mismatch - {e}")
+        raise
+    except Exception as e:
+        print(f"ERROR: An unexpected error occurred in evaluate_accuracy() function: {e}")
+        raise
              
 def main():
     try:
         # Load the dataset
-        train_images, train_labels, _, _ = load_mnist_dataset('mnist.npz')
+        train_images, train_labels, test_images, test_labels = load_mnist_dataset('mnist.npz')
 
-        # Filter for digits 0 and 1
+        # Filter training dataset for digits 0 and 1
         filter_indices = np.where((train_labels == 0) | (train_labels == 1))
         train_images_filtered = train_images[filter_indices]
         train_labels_filtered = train_labels[filter_indices]
-
+        
+        # Filter testing dataset for digits 0 and 1
+        filter_indices = np.where((test_labels == 0) | (test_labels == 1))
+        test_images_filtered = test_images[filter_indices]
+        test_labels_filtered = test_labels[filter_indices]
+        
         # Relabel the classes as -1 and 1
         train_labels_filtered = np.where(train_labels_filtered == 0, -1, 1)
+        test_labels_filtered =  np.where(test_labels_filtered == 0, -1, 1)
 
         # Define the number of validation samples per class
         num_val_samples = 1000
@@ -254,11 +290,13 @@ def main():
         # Reshape images to vectors for PCA and further processing
         train_images_final_vectorized = train_images_final.reshape(train_images_final.shape[0], -1)
         val_images_vectorized = val_images.reshape(val_images.shape[0], -1)
-
+        test_images_vectorized = test_images_filtered.reshape(test_images_filtered.shape[0], -1)
+        
         # Testing log
         print("Shapes of datasets after spltting:")
         print(f"Training set: {train_images_final_vectorized.shape}")
-        print(f"Validation set: {val_images_vectorized.shape}\n", )
+        print(f"Validation set: {val_images_vectorized.shape}", )
+        print(f"Test set: {test_images_vectorized.shape}\n", )
 
          # Apply PCA on the training data
         train_reduced, pca_components, pca_mean = apply_pca(train_images_final_vectorized, 5)
@@ -267,16 +305,49 @@ def main():
         val_centered = val_images_vectorized - pca_mean
         val_reduced = np.dot(val_centered, pca_components)
 
+        # Transform the test data using the same PCA transformation
+        test_centered = test_images_vectorized - pca_mean
+        test_reduced = np.dot(test_centered, pca_components)
+        
         # Testing log
         print("Shapes of reduced datasets after PCA:")
         print(f"Training set reduced: {train_reduced.shape}")
         print(f"Validation set reduced: {val_reduced.shape}\n")
         
-         # Training AdaBoost with decision stumps on reduced training data
+        # Training AdaBoost with decision stumps on reduced training data
         models, alphas = adaboost_train(train_reduced, train_labels_final, num_iterations=300)
         
         print("\nAdaBoost training with 300 decision stump models completed successfully.\n")
         
+        # Variables to track the best model and accuracy metrics
+        best_val_accuracy = 0
+        best_model_idx = 0
+        accuracies = []
+
+        # Evaluate all 300 decision stumps on the validation dataset
+        for i in range(len(models)):
+            current_accuracy = evaluate_accuracy(val_reduced, val_labels, models[:i+1], alphas[:i+1])
+            accuracies.append(current_accuracy)
+            print(f"Iteration {i+1}: Validation Accuracy = {current_accuracy * 100:.2f}%")
+            
+            if current_accuracy > best_val_accuracy:
+                best_val_accuracy = current_accuracy
+                best_model_idx = i
+        
+        # Plot accuracy vs number of trees
+        plt.figure(figsize=(14, 8))
+        plt.plot(range(1, len(models) + 1), accuracies, marker='o')
+        plt.xlabel('Number of Trees')
+        plt.ylabel('Validation Accuracy')
+        plt.title('Validation Accuracy vs. Number of Trees')
+        plt.grid(True)
+        plt.show()
+
+        # Evaluate the best model on the test set
+        test_accuracy = evaluate_accuracy(test_reduced, test_labels_filtered, models[:best_model_idx+1], alphas[:best_model_idx+1])
+        print(f"\nTest Accuracy with the best model: {test_accuracy * 100:.2f}%")
+        
+
     except Exception as e:
         print(f"ERROR: An unexpected error occurred in main() function: {e}")
 
