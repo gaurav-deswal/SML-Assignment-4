@@ -335,7 +335,7 @@ def main():
                 best_model_idx = i
         
         # Plot accuracy vs number of trees
-        plt.figure(figsize=(14, 8))
+        plt.figure(figsize=(14, 8)
         plt.plot(range(1, len(models) + 1), accuracies, marker='o')
         plt.xlabel('Number of Trees')
         plt.ylabel('Validation Accuracy')
